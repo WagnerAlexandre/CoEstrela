@@ -65,7 +65,7 @@ def getCoestrelas(filmografia:dict,session:requests.Session):
 
         for ator in tqdm.tqdm(filme['Elenco'],desc=" > Elenco", leave=False, unit="ator"):
             if not coEstrelas.get(ator):
-                info = getInfoAtorElenco(ator,coEstrelas,session)
+                info = getInfoAtorElenco(ator,session)
                 coEstrelas[ator] = info
         saveProgress('Coestrelas.json',coEstrelas)
 
