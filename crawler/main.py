@@ -1,100 +1,138 @@
-import requests
+import requests, tqdm, json, os , re, time
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
-import tqdm
-import json
-import os
-import re
-
-
-'''tabela de consulta rapida, trate como uma
-cache para evitar acesso desnecessario para
-uma pagina de um colega de elenco.
-'''
-global tableGender
-tableGender = {}
 
 '''
-Dado a referencia de um participante do elenco, retorna o genero
+Dado o nome de um arquivo, carrega na memoria o conteudo de um .json dentro de um dicionario.
 '''
-def getInfoCastGender(href: str, session:requests.Session):
-    global tableGender
+def loadProgressDict(fileName):
+    try:
+        with open(fileName,'r',encoding='UTF-8') as file:
+            progress = json.load(file)
+            return progress
+    except FileNotFoundError:
+        return {}
 
-    if href in tableGender:
-        return tableGender[href]
-    else:
-        url = "https://www.themoviedb.org" + href
-        with session.get(url) as page:
+'''
+Dado o nome de um arquivo e um dicionario, salva as informações do dicionario como um .json
+'''
+def saveProgress(fileName:str,info):
+    with open(fileName,'w',encoding='UTF-8') as file:
+        json.dump(info,file, indent=4, ensure_ascii=False)
 
-            print(f"[GET] {url} -> Status: {page.status_code}")
 
-            if page.status_code != 200:
-                print(f"[ERRO HTTP] Falha ao acessar {url}")
-                return None
-
+'''
+Dado o id de um ator, tenta coletar as informações basicas
+'''
+def getInfoAtorElenco(href: str, session:requests.Session):
+    try:
+        with session.get('https://www.themoviedb.org'+href) as page:
+            page.raise_for_status()
             html = page.text
             soup = BeautifulSoup(html, 'lxml')
+            ator = {}
 
-            fatos = soup.find('section', attrs={'class': 'facts'})
-
-
-            if not fatos:
-                print(f"[ERRO HTML] 'facts' não encontrado em {url}")
-                return None
+            nome = soup.find('h2',attrs={'class':"title"}).a.text
+            ator['Nome'] = nome
+            fatos = soup.find('section', attrs={'class':'facts'})
 
             for p in fatos.find_all('p'):
-                if 'Gênero' in p.get_text():
+                if p.strong and p.bdi and not ("Também conhecido(a)" in p.get_text()):
                     label = p.strong.bdi.get_text(strip=True)
                     value = p.get_text(strip=True).replace(label, '').strip()
-                    tableGender[href] = value
-                    return value
-
-            print(f"[INFO] Gênero não encontrado em {url}")
-            return None
-
-
+                    ator[label] = value
+                pass
+            return ator
+    except (requests.exceptions.RequestException, Exception) as e:
+        with open('LastLog.txt','w',encoding='UTF-8')as file:
+            file.write('Erro ao realizar requisição para coleta de informações sobre elenco! Abortando para manter integridade.')
+        exit()
+    
 '''
-Dado o id de um filme, coleta as informações do elenco (nome, referencia e genero)
+Dada um dicionario de filmografia, obtem a lista de atores que participaram de cada filme (sem repetição).
 '''
-def getInfoCast(href: str, session: requests.Session):
-    with session.get("https://www.themoviedb.org" + href + "/cast") as page:
-        html = page.text
-        soup = BeautifulSoup(html, 'lxml')
+def getCoestrelas(filmografia:dict,session:requests.Session):
+    coEstrelas = loadProgressDict('Coestrelas.json')
+    pbar_total = tqdm.tqdm(filmografia.values(), desc="Processando Filmografia", unit="filme")
 
-        castlist = soup.find('ol', attrs={'class': 'people credits'}).find_all('div', attrs={'class': 'info'})
-        castRefer = {}
-        for c in castlist:
-            nome = c.a.getText()
-            actor_href = c.a['href']
-      
-            genero = getInfoCastGender(actor_href, session)
-            castRefer[actor_href] = {
-                'nome': nome,
-                'Genero': genero
-            }
-        return castRefer
+    total_itens = len(pbar_total)
+    delay_por_item = 1.0 / total_itens if total_itens > 0 else 0
 
+
+    for filme in pbar_total:
+        pbar_total.set_description(f"Filme: {filme['Nome']}")
+        start_time = time.time()
+
+        for ator in tqdm.tqdm(filme['Elenco'],desc=" > Elenco", leave=False, unit="ator"):
+            if not coEstrelas.get(ator):
+                info = getInfoAtorElenco(ator,coEstrelas,session)
+                coEstrelas[ator] = info
+        saveProgress('Coestrelas.json',coEstrelas)
+
+        tempo_decorrido = time.time() - start_time
+        if tempo_decorrido < delay_por_item:
+            time.sleep(delay_por_item - tempo_decorrido)
+    return coEstrelas
 
 def limpar_nome_arquivo(href):
     return re.sub(r'[\\/*?:"<>|]', "_", href.strip('/'))
 
+'''
+Dada a referência de uma filme, obtém o elenco (pode repetir)
+'''
+def getElenco(href:str, session:requests.Session):
+    with session.get("https://www.themoviedb.org" + href + "/cast") as page:
+        html = page.text
+        soup = BeautifulSoup(html, 'lxml')
+        castlist = soup.find('ol', attrs={'class': 'people credits'}).find_all('div', attrs={'class': 'info'})
+        elenco = []
+
+        for c in castlist:
+            elenco.append(c.find_next('p').a['href'])
+            pass
+
+        return elenco
+
+'''
+Dada a referência de um filme, obtém informações sobre ele
+"Diretor":      O diretor do filme
+"Lançamento":   Data de Lançamento do filme (A depender da região)
+"Duração":      A duração do filme
+"Elenco":       Uma lista que contém a referencia dos atores que participaram do filme
+'''
 def getInfoFilme(href: str, session: requests.Session):
     url_completa = "https://www.themoviedb.org" + href
     try:
         with session.get(url_completa, timeout=15) as page:
-            # Se o status não for 200, lançamos um erro para cair no except
             page.raise_for_status()
 
             html = page.text
             soup = BeautifulSoup(html, 'lxml')
 
-            # --- Extração de Gêneros ---
-            divGen = soup.find_all('span', attrs={'class': 'genres'})
-            generos = [g.getText(strip=True) for g in divGen]
+            # extraindo generos
+            generos = []
+            divGen = soup.find('span', attrs={'class': 'genres'}).find_all('a')
+            if divGen != None:
+                for gen in divGen:
+                    generos.append(gen.get_text().strip())
+            else:
+                generos = 'Não Especificado'
 
-            # --- Extração de Diretor ---
-            # Usando find com proteção para caso o elemento não exista (evita AttributeError)
+            # extraindo data de lançamento
+            divLaunch = soup.find('span',attrs={"class":"release"})
+            if divLaunch!= None:
+                lancamento = divLaunch.get_text().strip()
+            else:
+                lancamento = 'Não Especificado'
+
+            # extraindo duração
+            divDur = soup.find('span',attrs={"class":"runtime"})
+            if divDur!= None:
+                duracao = divDur.get_text().strip()
+            else:
+                duracao = 'Não Especificado'
+
+            # extraindo diretor
             divDir = soup.find('li', attrs={'class': 'profile'})
             if divDir and divDir.p:
                 nome = divDir.p.getText(strip=True)
@@ -103,44 +141,82 @@ def getInfoFilme(href: str, session: requests.Session):
             else:
                 diretor = ("N/A", "Desconhecido")
 
-            # --- Extração de Elenco ---
-            elenco = getInfoCast(href, session)
+            # extraindo o elenco
+            elenco = getElenco(href, session)
 
-            return generos, diretor, elenco
+            movieInfo = {'Genero': generos,
+                         'Lançamento': lancamento,
+                         'Diretor': diretor,
+                         'Duracao': duracao,
+                         'Elenco': elenco}
+            return movieInfo
 
     except Exception as e:
-        # 1. Registrar o erro no log
         with open("erros_extracao.log", "a", encoding="utf-8") as log:
             log.write(f"ERRO: {href} | Motivo: {str(e)}\n")
-
-        # 2. Salvar o HTML da página que deu erro para análise posterior
         try:
             nome_arquivo = f"erro_{limpar_nome_arquivo(href)}.html"
-            # Cria uma pasta de erros se não existir
             if not os.path.exists("debug_errors"):
                 os.makedirs("debug_errors")
 
             caminho_completo = os.path.join("debug_errors", nome_arquivo)
 
             with open(caminho_completo, "w", encoding="utf-8") as f:
-                # Tenta salvar o texto da página se ela chegou a ser baixada
                 conteudo = page.text if 'page' in locals() else "Não foi possível baixar o HTML"
                 f.write(f"\n")
                 f.write(f"\n")
                 f.write(conteudo)
         except:
-            pass # Se falhar ao salvar o log de erro, apenas ignora para não travar o loop
-
-        # Retorna valores vazios para que o loop principal continue sem quebrar
+            pass 
         return [], ("Erro", "Erro"), {}
+
 '''
-Dado o id de um ator, retorne as informações basicas deste ator, filmes que trabalhou.
+Dada uma pagina de um Ator, retorna a filmografia, contendo somente os filmes que
+este ator fez parte, junto com informações sobre o filme
+"href": {
+    "Diretor":"",           Diretor do filme
+    "Lançamento": "",       Data de lançamento do filme
+    "Duração": "",          Duração do filme
+    "Elenco": []            Uma lista de href que apontam para cada ator do elenco
+}
 '''
-def getInfoAtor(href: str, session:requests.Session):
-    page = session.get('https://www.themoviedb.org/'+href)
+def getFilmografia(soup:BeautifulSoup, session: requests.Session):
+    filmes = soup.find_all('a', attrs={'class':'tooltip'})
+    saveName = 'Filmografia.json'
+
+    filmeStack = loadProgressDict(saveName)
+    total_itens = len(filmes)
+    delay_por_item = 1.0 / total_itens if total_itens > 0 else 0
+
+    for f in tqdm.tqdm(filmes,desc='Filmografia',leave=True):
+        start_time = time.time()
+        href = f['href']
+        if not filmeStack.get(href):
+            if "movie" in href:
+                info = getInfoFilme(href,session)
+                filmeStack[href] = {
+                        "Nome":f.bdi.get_text().strip(),
+                        'Genero': info['Genero'],
+                        'Lançamento': info['Lançamento'],
+                        'Diretor': info['Diretor'],
+                        'Duracao': info['Duracao'],
+                        'Elenco': info['elenco']
+                    }
+                saveProgress(saveName,filmeStack)
+        tempo_decorrido = time.time() - start_time
+        if tempo_decorrido < delay_por_item:
+            time.sleep(delay_por_item - tempo_decorrido)
+    return filmeStack
+
+
+'''
+Dado o id do ator, retorne as informações basicas deste ator, filmes que trabalhou 
+e colegas que teve ao longo da carreira.
+'''
+def getInfoAtorPrincipal(href: str, session:requests.Session):
+    page = session.get('https://www.themoviedb.org'+href)
     html = page.text
     soup = BeautifulSoup(html, 'lxml')
-    global tableGender
 
     ator = {
         "Nome":"",
@@ -162,34 +238,18 @@ def getInfoAtor(href: str, session:requests.Session):
             value = p.get_text(strip=True).replace(label, '').strip()
             ator[label] = value
         pass
-    if not tableGender.get(href):
-        tableGender[href]=ator['Gênero']
 
-    filmes = soup.find_all('a', attrs={'class':'tooltip'})
-    filmeStack = []
-    for f in filmes:
-        filmeFormat = {
-        "Nome": f.bdi.getText(),
-        "href": f.get('href'),
-        }
+    saveProgress("AtorPrincipal.json",ator)
 
-        filmeStack.append(filmeFormat)
 
+    filmografia = getFilmografia(soup, session)
+    
     print("Informações basicas e filmografia coletadas!")
-    return ator,filmeStack
+    return ator,filmografia
 
 '''
-Remove entradas duplicadas de uma lista.
+Cria uma request.Session, que será passada por entre as funções do crawler.
 '''
-def rmvDuplicatas(lista):
-    vistos = set()
-    nova_lista = []
-    for filme in lista:
-        if filme['href'] not in vistos:
-            vistos.add(filme['href'])
-            nova_lista.append(filme)
-    return nova_lista
-
 def get_session():
     session = requests.Session()
     session.headers.update({
@@ -197,26 +257,31 @@ def get_session():
         'Accept-Language': 'pt-BR,pt;q=0.9',
         'Referer': 'https://www.themoviedb.org/'
     })
-    # Configurando o Pool para ser maior que o número de threads
+    # caso de threading
     adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
     session.mount('https://', adapter)
     return session
 
 '''
-Abra uma sessão para rodar as requisições
+Abra uma sessão para rodar as requisições.
 '''
-with get_session() as session:
-    ator, filmes = getInfoAtor('person/113-christopher-lee',session)
+def start(href:str):
+    with get_session() as session:
+        ator, filmografia = getInfoAtorPrincipal(href,session)
 
-    filmes = rmvDuplicatas(filmes)
-    ator['Filmografa'] = filmes
+        ator['Filmografa'] = filmografia
 
+        saveProgress('Sir Lee.json',ator)
 
-    with open('Sir Lee.json', 'w', encoding='utf-8') as f:
-        json.dump(ator, f, indent=4, ensure_ascii=False)
+        colegasElenco = getCoestrelas(filmografia,session)
+        ator['CoEstrelas'] = colegasElenco
+        filename = ator['Nome'] + '.json'
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(ator, f, indent=4, ensure_ascii=False)
 
-    colegasElenco = []
-    with open('Sir LeeCowork.json', 'w', encoding='utf-8') as f:
-        for filme in tqdm.tqdm(filmes, desc="Filmes analisados", position=1):
-            generos,diretor,elenco = getInfoFilme(filme['href'],session)
-            json.dump((generos,diretor,elenco), f, indent=4, ensure_ascii=False)
+# href, link da referencia para a pagina no TMDB (https://www.themoviedb.org/)
+# Coloque no seguinte formato: '/person/{id}'
+# Evite: 'person/113-christopher-lee' ; '/person/christopher-lee'
+
+href = '/person/113-christopher-lee'
+start(href)
