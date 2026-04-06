@@ -1,4 +1,4 @@
-import requests, tqdm, json, os , re, time
+import requests, tqdm, json, time, os
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 
@@ -56,7 +56,7 @@ def getCoestrelas(filmografia:dict,session:requests.Session):
     pbar_total = tqdm.tqdm(filmografia.values(), desc="Processando Filmografia", unit="filme")
 
     total_itens = len(pbar_total)
-    delay_por_item = 1.0 / total_itens if total_itens > 0 else 0
+    delay_por_item = 1 / total_itens if total_itens > 0 else 0
 
 
     for filme in pbar_total:
@@ -73,9 +73,6 @@ def getCoestrelas(filmografia:dict,session:requests.Session):
         if tempo_decorrido < delay_por_item:
             time.sleep(delay_por_item - tempo_decorrido)
     return coEstrelas
-
-def limpar_nome_arquivo(href):
-    return re.sub(r'[\\/*?:"<>|]', "_", href.strip('/'))
 
 '''
 Dada a referência de uma filme, obtém o elenco (pode repetir)
@@ -155,7 +152,7 @@ def getInfoFilme(href: str, session: requests.Session):
         with open("erros_extracao.log", "a", encoding="utf-8") as log:
             log.write(f"ERRO: {href} | Motivo: {str(e)}\n")
         try:
-            nome_arquivo = f"erro_{limpar_nome_arquivo(href)}.html"
+            nome_arquivo = f"erro_{(href)}.html"
             if not os.path.exists("debug_errors"):
                 os.makedirs("debug_errors")
 
@@ -186,7 +183,7 @@ def getFilmografia(soup:BeautifulSoup, session: requests.Session):
 
     filmeStack = loadProgressDict(saveName)
     total_itens = len(filmes)
-    delay_por_item = 1.0 / total_itens if total_itens > 0 else 0
+    delay_por_item = 0.1 / total_itens if total_itens > 0 else 0
 
     for f in tqdm.tqdm(filmes,desc='Filmografia',leave=True):
         start_time = time.time()
@@ -200,7 +197,7 @@ def getFilmografia(soup:BeautifulSoup, session: requests.Session):
                         'Lançamento': info['Lançamento'],
                         'Diretor': info['Diretor'],
                         'Duracao': info['Duracao'],
-                        'Elenco': info['elenco']
+                        'Elenco': info['Elenco']
                     }
                 saveProgress(saveName,filmeStack)
         tempo_decorrido = time.time() - start_time
