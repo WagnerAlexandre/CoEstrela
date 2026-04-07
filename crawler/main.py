@@ -2,10 +2,10 @@ import requests, tqdm, json, time, os
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 
-'''
-Dado o nome de um arquivo, carrega na memoria o conteudo de um .json dentro de um dicionario.
-'''
 def loadProgressDict(fileName):
+    '''
+    Dado o nome de um arquivo, carrega na memoria o conteudo de um .json dentro de um dicionario.
+    '''
     try:
         with open(fileName,'r',encoding='UTF-8') as file:
             progress = json.load(file)
@@ -13,18 +13,18 @@ def loadProgressDict(fileName):
     except FileNotFoundError:
         return {}
 
-'''
-Dado o nome de um arquivo e um dicionario, salva as informações do dicionario como um .json
-'''
 def saveProgress(fileName:str,info):
+    '''
+    Dado o nome de um arquivo e um dicionario, salva as informações do dicionario como um .json
+    '''
     with open(fileName,'w',encoding='UTF-8') as file:
         json.dump(info,file, indent=4, ensure_ascii=False)
 
 
-'''
-Dado o id de um ator, tenta coletar as informações basicas
-'''
 def getInfoAtorElenco(href: str, session:requests.Session):
+    '''
+    Dado o id de um ator, tenta coletar as informações basicas
+    '''
     try:
         with session.get('https://www.themoviedb.org'+href) as page:
             page.raise_for_status()
@@ -48,10 +48,10 @@ def getInfoAtorElenco(href: str, session:requests.Session):
             file.write('Erro ao realizar requisição para coleta de informações sobre elenco! Abortando para manter integridade.')
         exit()
     
-'''
-Dada um dicionario de filmografia, obtem a lista de atores que participaram de cada filme (sem repetição).
-'''
 def getCoestrelas(filmografia:dict,session:requests.Session):
+    '''
+    Dada um dicionario de filmografia, obtem a lista de atores que participaram de cada filme (sem repetição).
+    '''
     coEstrelas = loadProgressDict('Coestrelas.json')
     pbar_total = tqdm.tqdm(filmografia.values(), desc="Processando Filmografia", unit="filme")
 
@@ -74,10 +74,10 @@ def getCoestrelas(filmografia:dict,session:requests.Session):
             time.sleep(delay_por_item - tempo_decorrido)
     return coEstrelas
 
-'''
-Dada a referência de uma filme, obtém o elenco (pode repetir)
-'''
 def getElenco(href:str, session:requests.Session):
+    '''
+    Dada a referência de uma filme, obtém o elenco (pode repetir)
+    '''
     with session.get("https://www.themoviedb.org" + href + "/cast") as page:
         html = page.text
         soup = BeautifulSoup(html, 'lxml')
@@ -90,14 +90,14 @@ def getElenco(href:str, session:requests.Session):
 
         return elenco
 
-'''
-Dada a referência de um filme, obtém informações sobre ele
-"Diretor":      O diretor do filme
-"Lançamento":   Data de Lançamento do filme (A depender da região)
-"Duração":      A duração do filme
-"Elenco":       Uma lista que contém a referencia dos atores que participaram do filme
-'''
 def getInfoFilme(href: str, session: requests.Session):
+    '''
+    Dada a referência de um filme, obtém informações sobre ele
+    "Diretor":      O diretor do filme
+    "Lançamento":   Data de Lançamento do filme (A depender da região)
+    "Duração":      A duração do filme
+    "Elenco":       Uma lista que contém a referencia dos atores que participaram do filme
+    '''
     url_completa = "https://www.themoviedb.org" + href
     try:
         with session.get(url_completa, timeout=15) as page:
@@ -167,17 +167,17 @@ def getInfoFilme(href: str, session: requests.Session):
             pass 
         return [], ("Erro", "Erro"), {}
 
-'''
-Dada uma pagina de um Ator, retorna a filmografia, contendo somente os filmes que
-este ator fez parte, junto com informações sobre o filme
-"href": {
-    "Diretor":"",           Diretor do filme
-    "Lançamento": "",       Data de lançamento do filme
-    "Duração": "",          Duração do filme
-    "Elenco": []            Uma lista de href que apontam para cada ator do elenco
-}
-'''
 def getFilmografia(soup:BeautifulSoup, session: requests.Session):
+    '''
+    Dada uma pagina de um Ator, retorna a filmografia, contendo somente os filmes que
+    este ator fez parte, junto com informações sobre o filme
+    "href": {
+        "Diretor":"",           Diretor do filme
+        "Lançamento": "",       Data de lançamento do filme
+        "Duração": "",          Duração do filme
+        "Elenco": []            Uma lista de href que apontam para cada ator do elenco
+    }
+    '''
     filmes = soup.find_all('a', attrs={'class':'tooltip'})
     saveName = 'Filmografia.json'
 
@@ -206,11 +206,11 @@ def getFilmografia(soup:BeautifulSoup, session: requests.Session):
     return filmeStack
 
 
-'''
-Dado o id do ator, retorne as informações basicas deste ator, filmes que trabalhou 
-e colegas que teve ao longo da carreira.
-'''
 def getInfoAtorPrincipal(href: str, session:requests.Session):
+    '''
+    Dado o id do ator, retorne as informações basicas deste ator, filmes que trabalhou 
+    e colegas que teve ao longo da carreira.
+    '''
     page = session.get('https://www.themoviedb.org'+href)
     html = page.text
     soup = BeautifulSoup(html, 'lxml')
@@ -244,10 +244,10 @@ def getInfoAtorPrincipal(href: str, session:requests.Session):
     print("Informações basicas e filmografia coletadas!")
     return ator,filmografia
 
-'''
-Cria uma request.Session, que será passada por entre as funções do crawler.
-'''
 def get_session():
+    '''
+    Cria uma request.Session, que será passada por entre as funções do crawler.
+    '''
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...',
@@ -259,10 +259,10 @@ def get_session():
     session.mount('https://', adapter)
     return session
 
-'''
-Abra uma sessão para rodar as requisições.
-'''
 def start(href:str):
+    '''
+    Abra uma sessão para rodar as requisições.
+    '''
     with get_session() as session:
         ator, filmografia = getInfoAtorPrincipal(href,session)
 
