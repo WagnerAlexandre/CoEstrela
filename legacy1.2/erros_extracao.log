@@ -1,0 +1,1 @@
+ERRO: /movie/653525-the-bengal-lancers | Motivo: HTTPSConnectionPool(host='www.themoviedb.org', port=443): Read timed out. (read timeout=15)
